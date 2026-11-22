@@ -11,9 +11,9 @@ Shows the server's own UI, installs games onto disk, verifies every file, plays,
 [![Bun](https://img.shields.io/badge/built%20with-Bun-f9f1e1?logo=bun&logoColor=14151a)](https://bun.sh)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)](tsconfig.json)
 [![Windows](https://img.shields.io/badge/Windows-NSIS%20installer-0078d4?logo=windows&logoColor=white)](#-building-a-release)
-[![Version](https://img.shields.io/badge/version-0.11.0-6b5bff)](package.json)
+[![Version](https://img.shields.io/badge/version-0.13.0-6b5bff)](package.json)
 
-[What it does](#-what-it-does) · [How it works](#-how-it-works) · [Layout](#-layout) · [Development](#-development) · [Releases & updates](#-building-a-release)
+[Quick setup](#-quick-setup) · [What it does](#-what-it-does) · [How it works](#-how-it-works) · [Layout](#-layout) · [Development](#-development) · [Releases & updates](#-building-a-release)
 
 </div>
 
@@ -21,6 +21,29 @@ Shows the server's own UI, installs games onto disk, verifies every file, plays,
 
 An Electron window shows the server's web UI, so the app is always current without shipping a new build. This
 process adds what a browser cannot do.
+
+## ⚡ Quick setup
+
+**To play.** Nothing to build; you need a Windows PC and the address of an Ahoy server.
+
+1. Open the server's address in a browser and press **Download** on its front page (Windows 10 and 11).
+2. Run the `Ahoy-Setup-<version>.exe` it gives you.
+3. Enter the server's address and the folder to install games into.
+4. Sign in, or create your account, on the server's page that follows. From then on the launcher keeps itself
+   current.
+
+**To build it.** You need Windows, [Bun](https://bun.sh) and an Ahoy server to point it at.
+
+```sh
+git clone https://github.com/robertson-dev/ahoy-launcher.git && cd ahoy-launcher
+bun install
+bun run start        # builds into dist/ and opens the app
+bun run dist         # release/Ahoy-Setup-<version>.exe + latest.yml + .blockmap
+```
+
+To hand that build to everyone, copy the installer, `latest.yml` and the `.blockmap` from `release/` into the
+server's `<config>/launcher/`. Ahoy's `deploy/unraid.py` does that by itself when this repository sits in Ahoy's
+folder as `launcher/`.
 
 ## ✨ What it does
 
