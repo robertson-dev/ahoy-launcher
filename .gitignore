@@ -1,0 +1,9 @@
+# ahoy-launcher — the Electron desktop app
+node_modules/
+dist/
+release/
+# a build to try before it is published (the Ahoy deploy publishes the newest installer in release/)
+release-next/
+*.log
+.DS_Store
+Thumbs.db

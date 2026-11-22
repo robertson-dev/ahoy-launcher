@@ -1,0 +1,58 @@
+{
+  "name": "ahoy-launcher",
+  "productName": "Ahoy",
+  "version": "0.13.0",
+  "description": "Ahoy launcher: your games, your friends, your server",
+  "private": true,
+  "main": "dist/main.cjs",
+  "scripts": {
+    "build": "bun build.ts",
+    "start": "bun run build && electron .",
+    "test": "bun test",
+    "dist": "bun run build && electron-builder --win nsis --publish never",
+    "e2e": "bun run build && electron tests/e2e.cjs",
+    "smoke": "bun run build && electron tests/smoke.cjs",
+    "test:update": "bun build.ts --with-updater && electron tests/update.cjs"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0",
+    "@types/node": "^24",
+    "electron": "45.2.3",
+    "electron-builder": "25.1.8",
+    "typescript": "^5.6.0"
+  },
+  "build": {
+    "appId": "app.ahoy.launcher",
+    "productName": "Ahoy",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "assets/**",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "Ahoy-Setup-${version}.exe",
+      "runAfterFinish": true
+    },
+    "publish": {
+      "provider": "generic",
+      "url": "http://ahoy.invalid/launcher"
+    }
+  },
+  "dependencies": {
+    "electron-updater": "6.8.11"
+  }
+}

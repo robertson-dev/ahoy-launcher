@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ahoy — connect</title>
+<style>
+  @font-face { font-family: "Figtree"; font-weight: 300 900; src: url(fonts/figtree-latin-wght-normal.woff2) format("woff2-variations"); }
+  @font-face { font-family: "Bricolage Grotesque"; font-weight: 200 800; src: url(fonts/bricolage-grotesque-latin-wght-normal.woff2) format("woff2-variations"); }
+  @font-face { font-family: "JetBrains Mono"; font-weight: 100 800; src: url(fonts/jetbrains-mono-latin-wght-normal.woff2) format("woff2-variations"); }
+  :root {
+    color-scheme: dark;
+    /* the web UI's neutrals (web/src/ahoy.css): no blue in the greys */
+    --bg: #101010; --deep: #0b0b0b; --card: #161616; --raised: #1e1e1e; --raised-2: #2a2a2a;
+    --line: rgba(255,255,255,.08); --line-strong: rgba(255,255,255,.16);
+    --fg: #f2f2f2; --fg-2: #a4a4a4; --fg-3: #6e6e6e; --lamp: #f2b24a; --ok: #4cc38a; --bad: #e0675f;
+    --ui: "Figtree", system-ui, "Segoe UI", sans-serif; --display: "Bricolage Grotesque", "Figtree", system-ui, sans-serif; --mono: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--bg); color: var(--fg); font: 14px/20px var(--ui); -webkit-font-smoothing: antialiased; display: flex; overflow: hidden; }
+  .shelf { position: relative; flex: 1; min-width: 0; background: var(--deep); overflow: hidden; -webkit-app-region: drag; }
+  .pane { -webkit-app-region: drag; }
+  input, button, details { -webkit-app-region: no-drag; }
+  .shelf .light { position: absolute; inset: 0; background: radial-gradient(60% 70% at 85% 35%, rgba(255,255,255,.06), transparent 70%); }
+  .shelf .row { position: absolute; left: 7%; bottom: 38%; display: flex; gap: 22px; align-items: flex-end; transform: perspective(1400px) rotateY(-16deg) rotateX(2deg); transform-origin: left bottom; }
+  .shelf .row img { width: 142px; height: 213px; object-fit: cover; border-radius: 4px; display: block; background: var(--raised); box-shadow: 0 30px 40px -18px rgba(0,0,0,.9), 0 0 0 1px rgba(255,255,255,.05); opacity: 0; transition: opacity .6s cubic-bezier(.22,1,.36,1); }
+  .shelf .row img.in { opacity: 1; }
+  .shelf .row img:nth-child(2) { transform: translateY(-6px); }
+  .shelf .row img:nth-child(4) { transform: translateY(-3px); }
+  .shelf .plank { position: absolute; left: 0; right: 0; bottom: calc(38% - 6px); height: 24px; background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,0)); border-top: 1px solid rgba(255,255,255,.07); transform: perspective(1400px) rotateY(-16deg); transform-origin: left bottom; }
+  .shelf .mirror { position: absolute; left: 7%; bottom: 14%; display: flex; gap: 22px; align-items: flex-start; transform: perspective(1400px) rotateY(-16deg) rotateX(-2deg) scaleY(-1); transform-origin: left top; opacity: .16; -webkit-mask-image: linear-gradient(180deg, #000, transparent 60%); mask-image: linear-gradient(180deg, #000, transparent 60%); }
+  .shelf .mirror img { width: 142px; height: 213px; object-fit: cover; border-radius: 4px; display: block; filter: blur(1px); opacity: 0; transition: opacity .6s; }
+  .shelf .mirror img.in { opacity: 1; }
+  .shelf .word { position: absolute; left: 56px; bottom: 56px; }
+  .shelf .word h1 { margin: 0 0 6px; font: 600 40px/44px var(--display); letter-spacing: -.01em; }
+  .pane { width: 480px; flex: none; background: var(--bg); border-left: 1px solid var(--line); padding: 56px 48px; display: flex; flex-direction: column; overflow-y: auto; }
+  .pane h2 { margin: 0 0 8px; font: 600 24px/28px var(--display); }
+  .pane > p { margin: 0 0 32px; color: var(--fg-2); }
+  .field { margin-bottom: 20px; }
+  .field label { display: block; font-size: 13px; color: var(--fg-2); margin-bottom: 8px; }
+  .field .row { display: flex; gap: 8px; }
+  .field .row input { flex: 1; min-width: 0; }
+  input { width: 100%; height: 40px; padding: 0 12px; background: var(--raised); border: 1px solid var(--line); border-radius: 8px; color: var(--fg); font: 14px var(--mono); outline: none; }
+  input:focus { border-color: var(--line-strong); }
+  button { font: 500 14px var(--ui); color: var(--fg); cursor: pointer; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 40px; padding: 0 16px; border-radius: 10px; background: var(--raised); border: 1px solid var(--line); white-space: nowrap; }
+  .btn:hover { background: var(--raised-2); }
+  .btn.primary { height: 44px; padding: 0 20px; border-radius: 12px; background: var(--fg); color: var(--bg); border-color: transparent; box-shadow: inset 0 1px 0 rgba(255,255,255,.5); font-size: 15px; }
+  .btn.primary:hover { background: #fff; }
+  .btn[disabled] { opacity: .55; cursor: default; }
+  /* the games take the room the window leaves between the fields and Connect, and the list scrolls inside it: its
+     heading, what Play said and the foot (the status line, Connect) stay in view however many games there are */
+  .here { margin-top: 12px; display: flex; flex-direction: column; flex: 0 1 auto; min-height: 136px; }
+  .here[hidden] { display: none; }
+  .here h3 { flex: none; margin: 0 0 8px; font: 500 13px/20px var(--ui); color: var(--fg-2); }
+  .here ul { flex: 0 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, .16) transparent; list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); -webkit-app-region: no-drag; }
+  .here li { display: flex; align-items: center; gap: 12px; height: 52px; border-bottom: 1px solid var(--line); }
+  .here li span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .here li .btn { height: 36px; min-width: 76px; }
+  .here .note { flex: none; margin: 8px 0 0; color: var(--bad); font-size: 13px; min-height: 20px; }
+  .foot { flex: none; margin-top: auto; padding-top: 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  .status { display: inline-flex; align-items: center; gap: 8px; color: var(--fg-2); font-size: 13px; min-width: 0; }
+  .status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--fg-3); flex: none; }
+  .status.ok::before { background: var(--ok); } .status.bad::before { background: var(--bad); } .status.busy::before { background: var(--lamp); }
+  @media (max-width: 900px) { .shelf { display: none; } .pane { width: 100%; } }
+  /* a short window: less air, so three games show before the list scrolls */
+  @media (max-height: 760px) { .pane { padding-top: 48px; padding-bottom: 32px; } .pane > p { margin-bottom: 16px; } }
+</style>
+</head>
+<body>
+  <div class="shelf">
+    <div class="light"></div>
+    <div class="row" id="row"></div>
+    <div class="plank"></div>
+    <div class="mirror" id="mirror"></div>
+    <div class="word"><h1>Ahoy</h1></div>
+  </div>
+  <div class="pane">
+    <h2>Connect to your server</h2>
+    <p>Whoever runs the server gives you its address. You sign in, or create your account, on the next screen.</p>
+    <div class="field"><label for="server">Server address</label><input id="server" placeholder="https://ahoy.example" autofocus></div>
+    <div class="field"><label for="dir">Install games into</label><div class="row"><input id="dir" readonly><button class="btn" id="pick">Browse…</button></div></div>
+    <div class="here" id="here" hidden><h3>On this PC</h3><ul id="games"></ul><p class="note" id="note" role="status"></p></div>
+    <div class="foot"><span class="status" id="msg">Looking for the server…</span><button class="btn primary" id="go">Connect</button></div>
+  </div>
+<script>
+  const L = window.ahoyLauncher;
+  const $ = id => document.getElementById(id);
+  const say = (text, cls = "") => { $("msg").className = "status " + cls; $("msg").textContent = text; };
+  const fail = e => say("Launcher error: " + (e && e.message || e), "bad");
+  if (!L) fail(new Error("the launcher bridge did not load; this build is broken, please report it"));
+  $("pick").onclick = async () => { try { const d = await L.pickDir(); if (d) $("dir").value = d; } catch (e) { fail(e); } };
+
+  // the shelf: the server's own box art, once it answers (the shelf and the art need no sign-in)
+  let shown = false;
+  async function shelf(serverUrl) {
+    if (shown) return;
+    try {
+      const r = await fetch(serverUrl + "/api/v1/shelf", { signal: AbortSignal.timeout(6000) });
+      const items = ((await r.json()).items || []).slice(0, 5);
+      if (!items.length) return;
+      shown = true;
+      for (const box of ["row", "mirror"]) for (const g of items) { const img = new Image(); img.alt = ""; img.src = `${serverUrl}/api/v1/art/game/${g.id}/poster`; img.onload = () => img.classList.add("in"); $(box).appendChild(img); }
+    } catch { /* no shelf, no harm */ }
+  }
+  async function probe(quiet) {
+    const serverUrl = $("server").value.trim().replace(/\/+$/, "");
+    if (!/^https?:\/\//.test(serverUrl)) { if (!quiet) say("The address needs to start with http:// or https://", "bad"); return null; }
+    say("Looking for the server…", "busy");
+    const r = await L.probe({ serverUrl });
+    // an address that sends on to another one is not taken for it: the launcher names where it leads (sendsTo)
+    if (!r.ok) { say(r.sendsTo ? `This address sends on to ${r.sendsTo}` : quiet && serverUrl === saved ? "Your server is not answering" : r.detail, "bad"); return r; }
+    say(`${r.detail} found`, "ok");
+    void shelf(serverUrl);
+    return r;
+  }
+  // the games on this PC start from here too: a server that is not answering keeps nobody from playing
+  const running = new Set();
+  let games = [];
+  const plain = e => String(e && e.message || e).replace(/^Error invoking remote method '[^']*': (Error: )?/, "");
+  function list() {
+    $("here").hidden = !games.length;
+    $("games").replaceChildren(...games.map(g => {
+      const li = document.createElement("li"), name = document.createElement("span"), b = document.createElement("button");
+      name.textContent = g.name; name.title = g.name;
+      b.className = "btn"; b.textContent = running.has(g.slug) ? "Running" : "Play"; b.disabled = running.has(g.slug);
+      b.onclick = async () => {
+        b.disabled = true; $("note").textContent = "";
+        try { await L.play(g.slug); } catch (e) { $("note").textContent = `${g.name}: ${plain(e)}`; list(); }
+      };
+      li.append(name, b);
+      return li;
+    }));
+  }
+  const playable = all => all.filter(g => g.kind !== "rom").sort((a, b) => a.name.localeCompare(b.name));
+  if (L) L.onEvent(e => {
+    if (e.type === "installed-changed") { games = playable(e.installed); list(); }
+    if (e.type === "play") { if (e.running) running.add(e.slug); else running.delete(e.slug); if (e.message) $("note").textContent = e.message; list(); }
+  });
+
+  // the saved server, looked for again while this page is up and its address is as saved: back to it once it answers as
+  // itself (one that sends on to another address is not ok, so nothing here follows it)
+  let saved = "", busy = false;
+  setInterval(async () => {
+    if (!saved || busy || $("server").value.trim().replace(/\/+$/, "") !== saved) return;
+    busy = true;
+    try { if ((await L.probe({ serverUrl: saved })).ok) await L.setConfig({ serverUrl: saved }); } catch { /* next time */ } finally { busy = false; }
+  }, 15000);
+
+  (async () => {
+    try {
+      const c = await L.config();
+      $("server").value = c.serverUrl || "";
+      $("dir").value = c.libraryDir;
+      saved = c.serverUrl || "";
+      if (c.serverUrl) void probe(true);
+      games = playable(await L.installed()); list();
+    } catch (e) { fail(e); }
+  })();
+  let t = null;
+  $("server").addEventListener("input", () => { clearTimeout(t); t = setTimeout(() => void probe(true), 600); });
+  $("go").onclick = async () => {
+    const serverUrl = $("server").value.trim().replace(/\/+$/, "");
+    if (!/^https?:\/\//.test(serverUrl)) { say("The address needs to start with http:// or https://", "bad"); return; }
+    $("go").disabled = true; say("Connecting…", "busy"); busy = true;
+    try {
+      const r = await L.setConfig({ serverUrl, libraryDir: $("dir").value });
+      if (r.ok) { say("Connected", "ok"); return; }          // the launcher now shows Ahoy's sign-in
+      // the address leads to another one: that one is put into the field, and connecting to it is the person's own press
+      if (r.sendsTo) { $("server").value = r.sendsTo; say("That address sends on to this one. Connect to use it.", "busy"); return; }
+      say(r.error || "could not connect", "bad");
+    } catch (e) { fail(e); } finally { $("go").disabled = false; busy = false; }
+  };
+</script>
+</body>
+</html>
