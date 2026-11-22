@@ -59,7 +59,7 @@ folder as `launcher/`.
 | 🎨 **Native feel** | Frameless window with its own title bar and themed scrollbars — the chrome belongs to the app, not the OS. |
 | 📺 **Big screen** | The server's own pages on the whole display, zoomed for a television (a 1080p set shows the app as a 1280 × 720 window, half again as large) and driven by a controller. `Ahoy.exe --big` starts in it (also when Ahoy already runs). In Settings → This PC, a controller's home button (Xbox, PS) can bring Ahoy to the front, or do that and open the big screen, from inside a game too: a window that is never shown listens for it while the setting is on. Windows' own Game Bar listens to the same button; turn that off in Windows (Settings → Gaming → Game Bar) if both answer. |
 
-## ⚙️ How it works
+## 🔩 How it works
 
 ```mermaid
 sequenceDiagram
@@ -125,7 +125,7 @@ build.ts           bundles main/preload/updater into dist/ (electron-updater is 
 tests/             the engine against a fake server (Range-served, session-checked files); e2e against a real one
 ```
 
-## 🛠️ Development
+## 🔧 Development
 
 ```sh
 bun install
