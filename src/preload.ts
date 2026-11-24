@@ -18,7 +18,10 @@ contextBridge.exposeInMainWorld("ahoyLauncher", {
   // "notify", "disk", "background" (0.13.0): a Windows notification while the window is not in front (clicked, it opens a
   // page of the app); the room on the drive games go to; the settings background and startWithWindows (closed, Ahoy stays
   // by the clock; it starts with Windows)
-  features: ["ahoy", "frameless", "sessions", "updates", "fullscreen", "argv", "launch-refresh", "script-start", "blocks", "zoom", "big", "pad-button", "notify", "disk", "background", "saves"],
+  // "display", "zoom-out" (0.14.0): what the PC knows of the display the window is on (its real size, whether it is the PC's
+  // own panel: a handheld is known by that, whatever Windows' scale), told again when it changes (event "display"); the
+  // page's zoom goes down to a half (a display with fewer points than the big screen has lines)
+  features: ["ahoy", "frameless", "sessions", "updates", "fullscreen", "argv", "launch-refresh", "script-start", "blocks", "zoom", "big", "pad-button", "notify", "disk", "background", "saves", "display", "zoom-out"],
   config: () => invoke("config:get"),
   probe: (patch: Record<string, unknown>) => invoke("config:probe", patch),
   setConfig: (patch: Record<string, unknown>) => invoke("config:set", patch),
@@ -36,8 +39,10 @@ contextBridge.exposeInMainWorld("ahoyLauncher", {
   /** the whole screen, natively (so Esc stays the page's own key); false gives the window back */
   fullscreen: (on: boolean) => invoke("window:fullscreen", !!on),
   isFullscreen: () => invoke("window:isFullscreen"),
-  /** the page's zoom: 1 is its real size, at most 4; the answer is the zoom it now has */
+  /** the page's zoom: 1 is its real size, from a half to four times; the answer is the zoom it now has */
   zoom: (factor: number) => invoke("window:zoom", Number(factor)),
+  /** the display the window is on, as the PC knows it (display.ts DisplayInfo): { internal, mm, inches, panel, points, scale } */
+  display: () => invoke("display:get"),
   /** was the big screen asked for (a start with --big, the pad's home button)? True once per asking */
   wantsBig: () => invoke("big:take"),
   /** a Windows notification, shown while the window is not in front (the answer says whether it was shown) */

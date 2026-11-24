@@ -1,7 +1,7 @@
 {
   "name": "ahoy-launcher",
   "productName": "Ahoy",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "Ahoy launcher: your games, your friends, your server",
   "private": true,
   "main": "dist/main.cjs",

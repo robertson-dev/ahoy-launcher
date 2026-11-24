@@ -23,6 +23,19 @@
  *               not in front, and clicking it tells the page which of its pages to open; closing the window leaves Ahoy
  *               running while the setting says so; a game's saves are found by the rules, brought to the server and put
  *               back from it (the server is the test's own), never with the setting off, never for a console dump
+ *   hands       what 0.14 adds, on a handheld (the display and Windows' word of its monitor are the test's own: a 7 inch
+ *               panel at Windows' 200%, 960 x 540 points): the window and its smallest size fit the work area; a page is
+ *               told the display's real size and that it is built in (Windows asked once, by a hidden PowerShell that is
+ *               the test's own stand-in); the setup page takes the whole display at the handheld's size, and a pad alone
+ *               walks it, starts a game, types the address on the page's own keyboard and connects; the server's page
+ *               gets its window back unless it asks for the whole display itself; a page zooms out to a half; in the
+ *               dock the page is told so, and the window fits whatever display it comes to
+ *   kept        the next start on that handheld: the panel's size kept by the run before answers a page at once, before
+ *               Windows has said anything (here it takes four seconds to), and the setup page is the handheld's from the start;
+ *               a size kept by another PC's profile is not believed (SMOKE_KEPT=other: the answer waits for Windows)
+ *   blind       Windows cannot be asked for its monitors (it refuses; with SMOKE_BLIND=hang it never answers): nothing is
+ *               called plugged in or measured, the page has its answer anyway (at once, or after the five seconds the
+ *               launcher waits at most), and the launcher is as 0.13 was: the setup page in its window at its own size
  * Exit code 0 only when every step passed. SMOKE_ROOT=<folder> runs a copy of the app from there. SMOKE_SHOT=<file.png> saves a picture of the setup page.
  */
 const path = require("path");
@@ -368,8 +381,14 @@ async function big() {
   const wz = await js(`innerWidth`);
   if (z.v !== 1.5 || Math.abs(win.webContents.getZoomFactor() - 1.5) > 0.01 || Math.abs(w0 / wz - 1.5) > 0.05) throw new Error(`zoom 1.5: ${JSON.stringify(z)}, factor ${win.webContents.getZoomFactor()}, width ${w0} -> ${wz}`);
   const far = await call(`ahoyLauncher.zoom(9)`), odd = await call(`ahoyLauncher.zoom("big")`), back = await call(`ahoyLauncher.zoom(0)`);
-  if (far.v !== 4 || odd.v !== 1 || back.v !== 1 || Math.abs(win.webContents.getZoomFactor() - 1) > 0.01) throw new Error(`zoom bounds: ${JSON.stringify([far, odd, back])}`);
-  ok("the page zooms itself: the window is laid out smaller, never past 4, never under 1", `${w0} px wide, ${wz} at 1.5`);
+  if (far.v !== 4 || odd.v !== 1 || back.v !== 0.5) throw new Error(`zoom bounds: ${JSON.stringify([far, odd, back])}`);
+  const one = await call(`ahoyLauncher.zoom(1)`);
+  if (one.v !== 1 || Math.abs(win.webContents.getZoomFactor() - 1) > 0.01) throw new Error(`zoom back to 1: ${JSON.stringify(one)}`);
+  ok("the page zooms itself: the window is laid out smaller, never past 4, never under a half", `${w0} px wide, ${wz} at 1.5`);
+  // this PC's own display, whatever it is: the answer has its shape (Windows is really asked here, by a hidden PowerShell)
+  const disp = await call(`ahoyLauncher.display()`), dv = disp.v;
+  if (!dv || !(dv.internal === null || typeof dv.internal === "boolean") || !(dv.points?.width > 0 && dv.points?.height > 0 && dv.scale > 0) || !(dv.inches === null || dv.inches > 0)) throw new Error(`this PC's display: ${JSON.stringify(disp)}`);
+  ok("the page is told of this PC's display", JSON.stringify(dv));
 
   // the pad's home button: nothing listens until the setting wants it
   const padWin = () => BrowserWindow.getAllWindows().find(x => x !== win);
@@ -511,6 +530,227 @@ async function away() {
   server.close();
 }
 
+/**
+ * A handheld: a 7 inch panel of 1920 x 1080 at Windows' 200%. What Electron says of the displays and what Windows says of
+ * its monitors are the test's own (no PowerShell is started); the launcher, its pages and the bridge are the real ones.
+ */
+async function hands() {
+  const display = o => ({ id: 7, label: "", internal: false, touchSupport: "available", rotation: 0, scaleFactor: 2, size: { width: 960, height: 540 }, bounds: { x: 0, y: 0, width: 960, height: 540 },
+    workArea: { x: 0, y: 0, width: 960, height: 492 }, workAreaSize: { width: 960, height: 492 }, ...o });
+  let now = display({});
+  /** a size as asked for, to a few pixels (this PC's own scale rounds what a window takes) */
+  const near = (a, b) => Math.abs(a - b) <= 3;
+  // (before the launcher's own start is heard: its window is made on this display)
+  app.whenReady().then(() => { const s = electron.screen; s.getPrimaryDisplay = () => now; s.getDisplayMatching = () => now; s.getAllDisplays = () => [now]; });
+  // the panel: wired inside by embedded DisplayPort (which Electron does not call built in), 15 x 9 cm, nameless
+  let monitors = { size: [{ i: "DISPLAY\\PNL0001\\1", a: true, w: 15, h: 9 }], link: [{ i: "DISPLAY\\PNL0001\\1", t: 11 }], name: [] };
+  const cp = require("child_process"), realExec = cp.execFile, asked = [];
+  cp.execFile = (file, args, opts, cb) => {
+    if (!/powershell\.exe$/i.test(String(file))) return realExec(file, args, opts, cb);
+    asked.push({ args, opts });
+    setTimeout(() => cb(null, JSON.stringify(monitors) + "\r\n", ""), 150);
+    return {};
+  };
+  const server = serve("ahoy");
+  const port = await listen(server);
+  const SERVER = `http://127.0.0.1:${port}`;
+  const { win, url, js, call, bridge } = await start("");
+  await until(() => url().includes("setup.html") && !win.webContents.isLoading(), 15_000);
+  await bridge();
+
+  const feats = await js(`ahoyLauncher.features`);
+  for (const f of ["display", "zoom-out"]) if (!feats.includes(f)) throw new Error(`the bridge does not say "${f}": ${feats}`);
+  const d = await call(`ahoyLauncher.display()`);
+  const want = { internal: true, mm: { width: 150, height: 90 }, inches: 6.9, panel: 6.9, points: { width: 960, height: 540 }, scale: 2 };
+  if (JSON.stringify(d.v) !== JSON.stringify(want)) throw new Error(`the display: ${JSON.stringify(d)}`);
+  const q = asked[0];
+  if (asked.length !== 1 || q.opts?.windowsHide !== true || !(q.opts?.timeout > 0) || !q.args.includes("-NonInteractive") || !q.args.includes("-NoProfile") || q.args.at(-1).includes('"')) throw new Error(`how Windows was asked: ${JSON.stringify(asked)}`);
+  ok("a page is told the display's real size, and that it is the PC's own panel", `${d.v.inches} inches, built in; Windows asked once, hidden`);
+  const kept = await until(() => { try { return JSON.parse(fs.readFileSync(path.join(userData, "display.json"), "utf8")); } catch { return null; } }, 5_000);
+  if (kept.panel?.width !== 150 || kept.panel?.height !== 90 || kept.host !== os.hostname()) throw new Error(`the panel kept for the next start: ${JSON.stringify(kept)}`);
+  ok("the PC's own panel is kept for the next start (in its dock, Windows no longer lists it)");
+
+  // the setup page on a screen held in the hands: the whole display (here: its size, the window stays off the screen), larger.
+  // The window has no smallest size while it has the whole display: with one it would come out a frame larger than the display
+  await until(async () => (await call(`ahoyLauncher.isFullscreen()`)).v === true, 8_000);
+  const min = win.getMinimumSize();
+  if (min[0] !== 0 || min[1] !== 0) throw new Error(`the window's smallest size while it has the whole display: ${min}`);
+  await until(() => Math.abs(win.webContents.getZoomFactor() - 0.9) < 0.01, 5_000).catch(() => { throw new Error(`the setup page's zoom: ${win.webContents.getZoomFactor()}`); });
+  await sleep(300);
+  const b1 = win.getBounds(), page1 = await js(`({ h: innerHeight, w: innerWidth, drive: document.documentElement.dataset.drive, roomy: "roomy" in document.documentElement.dataset, at: document.querySelector("[data-pf]")?.id })`);
+  if (win.isVisible() || !near(b1.width, 960) || !near(b1.height, 540) || Math.abs(page1.h - 600) > 3 || page1.drive !== "pad" || !page1.roomy || page1.at !== "server") throw new Error(`the setup page in the hands: window ${JSON.stringify(b1)}, visible ${win.isVisible()}, page ${JSON.stringify(page1)}`);
+  ok("the setup page takes the whole display at the handheld's size, the focus on; the window has no smallest size meanwhile", `the window ${b1.width} x ${b1.height}; the page lays out ${page1.w} x ${page1.h} at zoom ${win.webContents.getZoomFactor().toFixed(2)}`);
+
+  // a pad of the test's own, where the page looks; the window is never in front, so it is told it has the focus
+  win.webContents.setBackgroundThrottling(false);
+  win.webContents.debugger.attach("1.3");
+  await win.webContents.debugger.sendCommand("Emulation.setFocusEmulationEnabled", { enabled: true });
+  const pump = async n => { for (let i = 0; i < n; i++) { await win.webContents.capturePage().catch(() => {}); await sleep(20); } };
+  const pad = down => js(`window.__pads = [{ buttons: Array.from({ length: 17 }, (_, i) => ({ pressed: i === ${down} })), axes: [0, 0] }]; 1`);
+  await js(`window.__pads = []; navigator.getGamepads = () => window.__pads; 1`);
+  await pad(-1); await pump(4);
+  const A = 0, B = 1, X = 2, MENU = 9, UP = 12, DOWN = 13, LEFT = 14, RIGHT = 15;
+  const press = async (b, times = 1) => { for (let i = 0; i < times; i++) { await pad(b); await pump(3); await pad(-1); await pump(3); } };
+  const at = () => js(`(() => { const e = document.querySelector("[data-pf]"); return e ? (e.dataset.k !== undefined ? "key " + e.dataset.k : e.id || e.textContent.trim()) : null; })()`);
+  const seen = [await at()];
+  for (const b of [DOWN, DOWN]) { await press(b); seen.push(await at()); }
+  if (seen.join(" > ") !== "server > pick > Play") throw new Error(`the pad over the page: ${seen.join(" > ")}`);
+  await press(A);
+  const note = await until(() => js(`document.getElementById("note").textContent`), 15_000);
+  if (!/missing executable/.test(note)) throw new Error(`A on Play said: ${note}`);
+  await press(DOWN); const last = await at();
+  await press(UP, 3); const first = await at();
+  if (last !== "go" || first !== "server") throw new Error(`down to Connect and back up: ${last}, ${first}`);
+  if ((await js(`[...document.querySelectorAll("*")].filter(e => { const s = getComputedStyle(e); return s.outlineStyle !== "none" && s.outlineWidth !== "0px"; }).length`)) !== 0) throw new Error("something on the page has an outline");
+  ok("the pad walks the page, and A on a game's Play reaches the launcher", `${seen.join(" > ")}; ${note}`);
+
+  // the address, on the page's own keyboard: walk to each key (its row first, then along it) and press A
+  await press(A);
+  if ((await at()) !== "key http://" || !(await js(`!document.querySelector(".osk").hidden && document.getElementById("server").getAttribute("inputmode") === "none"`))) throw new Error(`A on the address: ${await at()}`);
+  const key = async k => {
+    for (let i = 0; i < 40; i++) {
+      const w = await js(`(() => { const c = e => { const r = e.getBoundingClientRect(); return [(r.left + r.right) / 2, (r.top + r.bottom) / 2]; }; const f = document.querySelector(".key[data-pf]"), t = [...document.querySelectorAll(".osk .key")].find(e => e.dataset.k === ${JSON.stringify(k)}); return f && t ? { on: f === t, f: c(f), t: c(t) } : null; })()`);
+      if (!w) throw new Error(`no way to the key ${k}`);
+      if (w.on) { await press(A); return; }
+      await press(Math.abs(w.t[1] - w.f[1]) > 10 ? (w.t[1] > w.f[1] ? DOWN : UP) : w.t[0] > w.f[0] ? RIGHT : LEFT);
+    }
+    throw new Error(`never reached the key ${k}`);
+  };
+  for (const k of ["http://", ..."127.0.0.1", ":8790"]) await key(k);
+  const typed1 = await js(`document.getElementById("server").value`);
+  await press(X, 4);
+  for (const k of String(port)) await key(k);
+  const typed = await js(`document.getElementById("server").value`);
+  if (typed1 !== "http://127.0.0.1:8790" || typed !== SERVER) throw new Error(`typed: ${typed1}, then ${typed} (the server is ${SERVER})`);
+  const says = await until(() => js(`(() => { const m = document.querySelector(".osk-status"); return m.classList.contains("ok") ? m.textContent : null; })()`), 10_000)
+    .catch(async () => { throw new Error(`the keyboard's status line: ${JSON.stringify(await js(`[document.querySelector(".osk-status").className, document.querySelector(".osk-status").textContent, document.getElementById("msg").className, document.getElementById("msg").textContent]`))}`); });
+  await press(B);
+  if ((await at()) !== "server" || !(await js(`document.querySelector(".osk").hidden`))) throw new Error(`B on the keyboard: ${await at()}`);
+  // a finger on the address brings the same keyboard up (Windows' own stays down on a handheld), one beside it takes it down
+  const tap = await js(`(() => { const f = document.getElementById("server"), k = document.querySelector(".osk"); f.click(); const up = !k.hidden; document.querySelector("h2").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })); return { up, down: k.hidden, mode: f.getAttribute("inputmode"), value: f.value }; })()`);
+  if (!tap.up || !tap.down || tap.mode !== "none" || tap.value !== SERVER) throw new Error(`a finger on the address: ${JSON.stringify(tap)}`);
+  await press(A); await press(MENU);
+  await until(() => url().startsWith(SERVER + "/"), 20_000).catch(async () => { throw new Error(`Menu on the keyboard did not connect: ${JSON.stringify(await js(`[document.getElementById("msg").textContent, document.querySelector(".osk").hidden, document.querySelector("[data-pf]")?.id]`))}`); });
+  if (disk().serverUrl !== SERVER) throw new Error(`the saved server: ${disk().serverUrl}`);
+  ok("the address is typed with the pad on the page's own keyboard (a finger opens it too), and Menu connects", `${typed}; the page said "${says}"`);
+
+  // the server's page did not ask for the whole display: it gets its window back, inside the work area
+  await bridge();
+  await until(async () => (await call(`ahoyLauncher.isFullscreen()`)).v === false, 8_000);
+  const b2 = win.getBounds(), min2 = win.getMinimumSize();
+  if (b2.width > 960 + 3 || b2.height > 492 + 3 || win.isVisible() || min2[0] !== 960 || min2[1] !== 492) throw new Error(`the window given back: ${JSON.stringify(b2)}, smallest ${min2}`);
+  // and it zooms out, to a half
+  const w0 = await js(`innerWidth`);
+  const z = await call(`ahoyLauncher.zoom(0.75)`);
+  await sleep(300);
+  const wz = await js(`innerWidth`), low = await call(`ahoyLauncher.zoom(0.2)`), one = await call(`ahoyLauncher.zoom(1)`);
+  if (z.v !== 0.75 || Math.abs(wz / w0 - 1 / 0.75) > 0.05 || low.v !== 0.5 || one.v !== 1) throw new Error(`zooming out: ${JSON.stringify([z, low, one])}, width ${w0} -> ${wz}`);
+  ok("a server's page that does not ask for the whole display gets its window back, inside the work area and no smaller than fits there; a page zooms out to a half", `${b2.width} x ${b2.height}, smallest ${min2.join(" x ")}; ${w0} px wide, ${wz} at 0.75`);
+
+  // forgotten, the setup page is back with the whole display; a server's page that asks for it itself keeps it
+  await call(`ahoyLauncher.setConfig({ serverUrl: "" })`);
+  await until(() => url().includes("setup.html") && !win.webContents.isLoading(), 15_000);
+  await bridge();
+  await until(async () => (await call(`ahoyLauncher.isFullscreen()`)).v === true, 8_000);
+  await call(`ahoyLauncher.setConfig({ serverUrl: ${JSON.stringify(SERVER)} })`);
+  await until(() => url().startsWith(SERVER + "/") && !win.webContents.isLoading(), 20_000);
+  await bridge();
+  await call(`ahoyLauncher.fullscreen(true)`);
+  await sleep(3500);
+  if ((await call(`ahoyLauncher.isFullscreen()`)).v !== true || !near(win.getBounds().height, 540) || win.getMinimumSize().join() !== "0,0") throw new Error(`a page that asked for the whole display lost it: ${JSON.stringify(win.getBounds())}, smallest ${win.getMinimumSize()}`);
+  await call(`ahoyLauncher.fullscreen(false)`);
+  if (win.getMinimumSize().join() !== "960,492") throw new Error(`the smallest size after the whole display was left: ${win.getMinimumSize()}`);
+  ok("a server's page that asks for the whole display itself keeps it (its big screen follows the setup page without a flicker)");
+
+  // in the dock: the window is on a television, the panel switched off (Windows lists the television alone)
+  await js(`window.__d = []; ahoyLauncher.onEvent(e => { if (e && e.type === "display") window.__d.push(e.display); }); 1`);
+  monitors = { size: [{ i: "DISPLAY\\TVX0001\\2", a: true, w: 160, h: 90 }], link: [{ i: "DISPLAY\\TVX0001\\2", t: 5 }], name: [{ i: "DISPLAY\\TVX0001\\2", n: "Den TV" }] };
+  now = display({ id: 8, label: "Den TV", scaleFactor: 1.5, size: { width: 1280, height: 720 }, bounds: { x: 0, y: 0, width: 1280, height: 720 }, workArea: { x: 0, y: 0, width: 1280, height: 672 }, workAreaSize: { width: 1280, height: 672 } });
+  electron.screen.emit("display-added", {}, now);
+  const told = await until(() => js(`window.__d.find(d => d.internal === false) ?? null`), 10_000);
+  if (told.inches !== 72.3 || told.panel !== 6.9 || told.points.height !== 720 || told.scale !== 1.5 || asked.length !== 2) throw new Error(`in the dock: ${JSON.stringify(told)}, Windows asked ${asked.length} times`);
+  const minTv = win.getMinimumSize();
+  if (minTv[0] !== 980 || minTv[1] !== 640) throw new Error(`the smallest size on the television: ${minTv}`);
+  ok("another display: the page is told it is plugged in (the handheld in its dock), and whose panel the PC has", JSON.stringify(told));
+
+  // and back on the panel at 175%: a window larger than its work area is put inside it
+  win.setBounds({ x: 0, y: 0, width: 1280, height: 672 });
+  now = display({ scaleFactor: 1.75, size: { width: 1097, height: 617 }, bounds: { x: 0, y: 0, width: 1097, height: 617 }, workArea: { x: 0, y: 0, width: 1097, height: 569 }, workAreaSize: { width: 1097, height: 569 } });
+  electron.screen.emit("display-metrics-changed", {}, now, ["workArea", "scaleFactor"]);
+  await sleep(300);
+  const b3 = win.getBounds(), min3 = win.getMinimumSize();
+  if (b3.width > 1097 + 3 || b3.height > 569 + 3 || min3[0] !== 980 || min3[1] !== 569) throw new Error(`on a work area of 1097 x 569: window ${JSON.stringify(b3)}, smallest ${min3}`);
+  ok("the window and its smallest size follow the display it comes to", `${b3.width} x ${b3.height}, smallest ${min3.join(" x ")}`);
+  cp.execFile = realExec;
+  server.close();
+}
+
+/** The same handheld started again: Electron calls its panel built in, the size is the one the run before kept, and Windows
+ *  (the test's own stand-in) is slow to answer. */
+async function kept() {
+  const now = { id: 7, label: "", internal: true, touchSupport: "available", rotation: 0, scaleFactor: 1.5, size: { width: 1280, height: 720 }, bounds: { x: 0, y: 0, width: 1280, height: 720 },
+    workArea: { x: 0, y: 0, width: 1280, height: 672 }, workAreaSize: { width: 1280, height: 672 } };
+  app.whenReady().then(() => { const s = electron.screen; s.getPrimaryDisplay = () => now; s.getDisplayMatching = () => now; s.getAllDisplays = () => [now]; });
+  const cp = require("child_process"), realExec = cp.execFile;
+  let answered = false;
+  cp.execFile = (file, args, opts, cb) => {
+    if (!/powershell\.exe$/i.test(String(file))) return realExec(file, args, opts, cb);
+    setTimeout(() => { answered = true; cb(null, JSON.stringify({ size: [{ i: "P", a: true, w: 15, h: 9 }], link: [{ i: "P", t: 2147483648 }], name: [] }), ""); }, 4000);
+    return {};
+  };
+  // (kept by another PC, a profile that travelled: that PC's panel, here a 13 inch one, is not this one's)
+  const other = process.env.SMOKE_KEPT === "other";
+  fs.writeFileSync(path.join(userData, "display.json"), JSON.stringify(other ? { host: "another-pc", panel: { width: 290, height: 180 } } : { host: os.hostname(), panel: { width: 150, height: 90 } }));
+  const { win, url, call, bridge } = await start("");
+  await until(() => url().includes("setup.html") && !win.webContents.isLoading(), 15_000);
+  await bridge();
+  const t0 = Date.now(), d = await call(`ahoyLauncher.display()`), took = Date.now() - t0;
+  if (other) {
+    if (!answered || d.v?.internal !== true || d.v?.inches !== 6.9 || d.v?.panel !== 6.9) throw new Error(`with another PC's panel kept: ${JSON.stringify(d)} after ${took} ms, Windows had answered: ${answered}`);
+    ok("a panel's size kept by another PC's profile is not believed: the answer waits for Windows, and is this PC's", `${d.v.inches} inches`);
+    await until(async () => (await call(`ahoyLauncher.isFullscreen()`)).v === true, 3_000);    // (the page settles before the run ends)
+    cp.execFile = realExec;
+    return;
+  }
+  if (answered || took > 2000 || d.v?.internal !== true || d.v?.inches !== 6.9 || d.v?.panel !== 6.9) throw new Error(`the display on the next start: ${JSON.stringify(d)} after ${took} ms, Windows had answered: ${answered}`);
+  await until(async () => (await call(`ahoyLauncher.isFullscreen()`)).v === true, 3_000);
+  await until(() => Math.abs(win.webContents.getZoomFactor() - 1.2) < 0.01, 3_000).catch(() => { throw new Error(`the setup page's zoom: ${win.webContents.getZoomFactor()}`); });
+  if (answered) throw new Error("the setup page waited for Windows");
+  ok("on the next start the panel kept from the run before answers at once, and the setup page is the handheld's before Windows has said anything", `${took} ms; zoom ${win.webContents.getZoomFactor().toFixed(2)}`);
+  cp.execFile = realExec;
+}
+
+/** Windows cannot be asked for its monitors, on a display Electron does not call built in (a handheld's panel on embedded
+ *  DisplayPort is one): the launcher knows nothing more than 0.13 did, and behaves as it did. */
+async function blind() {
+  const now = { id: 7, label: "", internal: false, touchSupport: "available", rotation: 0, scaleFactor: 1.5, size: { width: 1280, height: 720 }, bounds: { x: 0, y: 0, width: 1280, height: 720 },
+    workArea: { x: 0, y: 0, width: 1280, height: 672 }, workAreaSize: { width: 1280, height: 672 } };
+  app.whenReady().then(() => { const s = electron.screen; s.getPrimaryDisplay = () => now; s.getDisplayMatching = () => now; s.getAllDisplays = () => [now]; });
+  const cp = require("child_process"), realExec = cp.execFile, hang = process.env.SMOKE_BLIND === "hang";
+  let asked = 0;
+  cp.execFile = (file, args, opts, cb) => {
+    if (!/powershell\.exe$/i.test(String(file))) return realExec(file, args, opts, cb);
+    asked++;
+    if (!hang) setTimeout(() => cb(Object.assign(new Error("Access denied"), { code: 1 }), "", "Access denied"), 100);
+    return {};                                                 // (hang: the answer never comes)
+  };
+  const { win, url, js, call, bridge } = await start("");
+  await until(() => url().includes("setup.html") && !win.webContents.isLoading(), 15_000);
+  await bridge();
+  const t0 = Date.now(), d = await call(`ahoyLauncher.display()`), took = Date.now() - t0;
+  const want = { internal: null, mm: null, inches: null, panel: null, points: { width: 1280, height: 720 }, scale: 1.5 };
+  if (JSON.stringify(d.v) !== JSON.stringify(want) || asked !== 1 || (hang ? took > 6500 : took > 2000)) throw new Error(`the display when Windows ${hang ? "never answers" : "refuses"}: ${JSON.stringify(d)} after ${took} ms, asked ${asked} times`);
+  if (fs.existsSync(path.join(userData, "display.json"))) throw new Error("a panel was kept though none was read");
+  // the setup page: its window (no larger than the work area), its own size, no whole display, as launcher 0.13 had it
+  await sleep(1200);
+  const b = win.getBounds(), min = win.getMinimumSize(), full = await call(`ahoyLauncher.isFullscreen()`);
+  const page = await js(`({ w: innerWidth, roomy: "roomy" in document.documentElement.dataset, drive: document.documentElement.dataset.drive ?? null, focus: document.activeElement?.id })`);
+  if (full.v !== false || Math.abs(win.webContents.getZoomFactor() - 1) > 0.01 || page.roomy || page.drive !== null || page.focus !== "server" || b.width > 1280 + 3 || b.height > 672 + 3 || min.join() !== "980,640")
+    throw new Error(`the setup page without a word of the display: fullscreen ${JSON.stringify(full)}, zoom ${win.webContents.getZoomFactor()}, page ${JSON.stringify(page)}, window ${JSON.stringify(b)}, smallest ${min}`);
+  ok(`Windows ${hang ? "never answers" : "refuses"} the question of its monitors: the page is told what is known and no more, and the launcher is as it was before`, `answered after ${took} ms; the setup page in a window of ${b.width} x ${b.height} at its own size`);
+  cp.execFile = realExec;
+}
+
 /** this file again, as a start of its own; its steps are printed under the case's name */
 const again = (name, env = {}) => new Promise(res => {
   const c = spawn(process.execPath, [__filename], { env: { ...process.env, SMOKE_CASE: name, SMOKE_SHOT: "", ...env }, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
@@ -520,7 +760,7 @@ const again = (name, env = {}) => new Promise(res => {
   c.on("exit", code => res({ code, lines: out.split(/\r?\n/).filter(l => /^(OK|FAIL|SKIPPED) /.test(l)) }));
 });
 
-const cases = { walk, spelling, "sent-on": sentOn, "setup-page": async () => setupPage(await start(`http://127.0.0.1:${await freePort()}`)), https: upgraded, big, away };
+const cases = { walk, spelling, "sent-on": sentOn, "setup-page": async () => setupPage(await start(`http://127.0.0.1:${await freePort()}`)), https: upgraded, big, away, hands, kept, blind };
 
 (async () => {
   try {
@@ -531,7 +771,7 @@ const cases = { walk, spelling, "sent-on": sentOn, "setup-page": async () => set
       const odd = path.join(tmp, "pct 100% fün");
       for (const d of ["dist", "assets"]) fs.cpSync(path.join(root, d), path.join(odd, d), { recursive: true });
       fs.copyFileSync(path.join(root, "package.json"), path.join(odd, "package.json"));
-      for (const [name, env] of [["spelling", {}], ["sent-on", {}], ["setup-page", { SMOKE_ROOT: odd }], ["https", {}], ["big", {}], ["away", {}]]) {
+      for (const [name, env] of [["spelling", {}], ["sent-on", {}], ["setup-page", { SMOKE_ROOT: odd }], ["https", {}], ["big", {}], ["away", {}], ["hands", {}], ["kept", {}], ["kept", { SMOKE_KEPT: "other" }], ["blind", {}], ["blind", { SMOKE_BLIND: "hang" }]]) {
         const r = await again(name, env);
         for (const l of r.lines) { steps.push(`   [${name}] ${l}`); console.log(steps.at(-1)); }
         if (r.code !== 0) throw new Error(`the ${name} case failed`);

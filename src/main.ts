@@ -10,7 +10,7 @@
  *   config:get · config:probe {serverUrl} · config:set {serverUrl?, libraryDir?, desktopShortcuts?} · config:pickDir
  *   session:set {token, user} | null · session:get · state · installed
  *   install (packageId) · install:cancel (packageId) · uninstall (slug, {deleteSaves?}) · play (slug) · openFolder (slug)
- *   window:fullscreen (on) · window:isFullscreen · window:zoom (factor) · big:take · update:state · update:check · update:install
+ *   window:fullscreen (on) · window:isFullscreen · window:zoom (factor) · display:get · big:take · update:state · update:check · update:install
  *   notify {title, body?, route?} · disk
  *   saves:state (slug, key, rules) · saves:push (slug, key, rules) · saves:pull (slug, key, rules, id) ·
  *   saves:agree (slug, key, rules, {id, digest}) · saves:pick (slug)
@@ -31,6 +31,15 @@
  * shown (assets/pad.html with the preload pad.ts): the browser tells a page of the pads whether or not it is in front, so
  * the button works from inside a game. "show" brings the launcher's window to the front; "big" does that and asks the page
  * for the big screen. The page takes the wish once (big:take), when it is ready for it.
+ *
+ * The display (display.ts): the window and its smallest size are kept inside the work area of the display it is on (a small
+ * panel at a high scale has less room than the usual minimum). A page is told what the PC knows of that display and the page
+ * cannot see (display:get, and the event "display" when the window moves to another one or the monitors change): whether it
+ * is the PC's own panel, and how large it really is, as the monitor says itself (read from Windows once per run, in the
+ * background; nothing but a page's own question ever waits for it). A built-in panel of a few inches is a handheld's, whatever
+ * Windows' scale: the server's page sizes its big screen by that, and the setup page takes the whole display there, larger,
+ * with the pad (setup-pad.ts). The page's zoom goes under 1 too (a display with fewer points than the big screen's lines).
+ *
  * A rejected call reaches the page as "Error invoking remote method '<channel>': Error: <message>"; a package that needs
  * a newer launcher fails install with a message holding "update-needed:".
  *
@@ -47,7 +56,8 @@
  * The setup page also lists the games on this PC with Play, so a server that does not answer keeps nobody from playing;
  * it looks for the saved server again by itself and goes back to it.
  */
-import { app, BrowserWindow, ipcMain, dialog, shell, Menu, Notification, Tray, nativeImage, safeStorage, type IpcMainInvokeEvent } from "electron";
+import { app, BrowserWindow, ipcMain, dialog, screen, shell, Menu, Notification, Tray, nativeImage, safeStorage, type IpcMainInvokeEvent, type Rectangle } from "electron";
+import { execFile } from "node:child_process";
 import { readFile, statfs } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { homedir, hostname, userInfo } from "node:os";
@@ -56,10 +66,8 @@ import { Engine, writeAtomic, type EngineEvent } from "./engine";
 import { Updater } from "./updater";
 import { ruleFor, type Places } from "./saves";
 import { Saves } from "./savesync";
+import { MONITOR_QUERY, boundsInside, displayInfo, panelOf, parseMonitors, windowFit, zoomOf, type DisplayInfo, type Mm, type Monitor } from "./display";
 import { HIDDEN_ARG, answeredAt, configPatch, externalUrl, httpsUpgrade, noteOf, packConfig, pageKind, sameServer, sessionOf, unpackConfig, type Config, type Seal } from "./guard";
-
-/** how far the page may be zoomed (the big screen asks for the display's height over 720: 3 on a 4K television) */
-const ZOOM_MAX = 4;
 
 export type { Config };
 
@@ -143,8 +151,10 @@ const kindOfPage = (url: string) => pageKind(url, config.serverUrl, setupUrl());
 const openOutside = (url: string) => { const ext = externalUrl(url); if (ext) void shell.openExternal(ext); };
 
 function createWindow() {
+  // on the display a new window opens on, and no larger than its work area: nor may its smallest size be (display.ts)
+  const fit = windowFit(screen.getPrimaryDisplay().workAreaSize);
   win = new BrowserWindow({
-    width: 1360, height: 860, minWidth: 980, minHeight: 640, backgroundColor: "#101010", title: "Ahoy",
+    width: fit.width, height: fit.height, minWidth: fit.minWidth, minHeight: fit.minHeight, backgroundColor: "#101010", title: "Ahoy",
     autoHideMenuBar: true,
     // automated runs keep the window off the screen from the start; started with Windows, it waits by the clock
     show: !automated && !startHidden,
@@ -173,10 +183,130 @@ function createWindow() {
   win.on("close", ev => { if (!quitting && config.background) { ev.preventDefault(); win?.hide(); } });
   win.on("session-end", () => { quitting = true; });
   // the pad watcher is a window too: it goes with this one, or the launcher would never quit
-  win.on("closed", () => { win = null; padWin?.destroy(); padWin = null; });
+  win.on("closed", () => { win = null; padWin?.destroy(); padWin = null; pretendFull = null; fullBy = null; });
+  // another display, or the same one at another scale: the window fits there, and the page is told where it is now
+  // (moved: the person let go of it; move: every step on the way, and the only word of a move made by a shortcut)
+  win.on("moved", onDisplay);
+  // (the whole display left: the window is as it was before, and has its minimum again)
+  win.on("leave-full-screen", onDisplay);
+  win.on("move", () => { clearTimeout(moveTimer); moveTimer = setTimeout(() => { keepMinimum(); tellDisplay(); }, 300); });
   startHidden = false;
   return win;
 }
+
+/* ─────────── the display the window is on (display.ts) ─────────── */
+
+/** Windows' monitors (null: not read yet, or they could not be), and the PC's own panel as an earlier run read it */
+let monitors: Monitor[] | null = null;
+let knownPanel: Mm | null = null;
+const panelPath = () => join(userData(), "display.json");
+let moveTimer: ReturnType<typeof setTimeout> | undefined, monitorTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** the display the window is on (the one a new window opens on while there is none), and the names of the others */
+function windowDisplay() {
+  const d = win && !win.isDestroyed() ? screen.getDisplayMatching(win.isMinimized() ? win.getNormalBounds() : win.getBounds()) : screen.getPrimaryDisplay();
+  return { d, others: screen.getAllDisplays().filter(x => x.id !== d.id).map(x => x.label) };
+}
+const displayNow = (): DisplayInfo => { const { d, others } = windowDisplay(); return displayInfo(d, monitors, others, knownPanel); };
+
+/** ask Windows for its monitors: their real size and how they are connected. Windows only; null when it cannot be asked */
+function readMonitors(): Promise<Monitor[] | null> {
+  if (process.platform !== "win32") return Promise.resolve(null);
+  const ps = join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+  return new Promise(res => {
+    try { execFile(ps, ["-NoProfile", "-NonInteractive", "-NoLogo", "-Command", MONITOR_QUERY], { windowsHide: true, timeout: 8000, maxBuffer: 1 << 20 }, (err, out) => res(err ? null : parseMonitors(String(out)))); }
+    catch { res(null); }
+  });
+}
+/** the read that is under way, or the last one: a page's question waits for it, nothing else does */
+let learning: Promise<void> | null = null, reads = 0;
+/** once per run, in the background, and again when a monitor comes or goes. The PC's own panel is kept for the next start:
+ *  in its dock with the panel off, Windows no longer lists it */
+function learnMonitors() {
+  const turn = ++reads;
+  learning = (async () => {
+    const got = await readMonitors();
+    if (turn !== reads) return;                              // a later read is under way: its answer is the one
+    monitors = got;
+    try {
+      const { d, others } = windowDisplay();
+      const panel = panelOf(d, got, others);
+      if (panel && (panel.width !== knownPanel?.width || panel.height !== knownPanel?.height)) {
+        knownPanel = panel;
+        await writeAtomic(panelPath(), JSON.stringify({ host: hostname(), panel })).catch(() => {});
+      }
+    } catch { /* no display to ask of: the next question finds one */ }
+    tellDisplay();
+  })();
+  return learning;
+}
+async function loadPanel() {
+  try {
+    const j = JSON.parse(await readFile(panelPath(), "utf8")) as { host?: unknown; panel?: { width?: unknown; height?: unknown } };
+    const w = Number(j?.panel?.width), h = Number(j?.panel?.height);
+    // (a profile that travelled to another PC brings that PC's panel: not this one's)
+    if (j?.host === hostname() && w > 0 && h > 0) knownPanel = { width: w, height: h };
+  } catch { /* none kept yet */ }
+}
+
+/** the page is told when what it was told last no longer holds */
+let toldDisplay = "";
+function tellDisplay() {
+  if (!win || win.isDestroyed()) return;
+  const info = displayNow(), key = JSON.stringify(info);
+  if (key === toldDisplay) return;
+  toldDisplay = key;
+  win.webContents.send("ahoy:event", { type: "display", display: info });
+}
+/**
+ * The smallest the window goes, on the display it is on now; and none at all while it has the whole display. A minimum is
+ * the window's with its frame, and on the whole display, where it has none, Windows makes it a frame larger than that: with
+ * a minimum of 980 × 640 the window was 1098 × 646 on a display of 1098 × 618 points (1080 lines at Windows' 175%) and
+ * 990 × 645 on one of 960 × 540, hanging over the bottom and the right edge (measured 2026-11-23; with the minimum merely
+ * fitted to such a display it still came out 6 points too tall). Without one it is the display, exactly.
+ */
+function keepMinimum(): Rectangle | null {
+  if (!win || win.isDestroyed()) return null;
+  const area = windowDisplay().d.workArea, whole = !!pretendFull || win.isFullScreen();
+  const fit = whole ? { minWidth: 0, minHeight: 0 } : windowFit(area), [mw, mh] = win.getMinimumSize();
+  if (mw !== fit.minWidth || mh !== fit.minHeight) win.setMinimumSize(fit.minWidth, fit.minHeight);
+  return area;
+}
+/** and the window itself, when it is larger than that display has room for, or smaller than it may be there (not while it
+ *  has the whole display, or none) */
+function keepInside() {
+  const area = keepMinimum();
+  if (!area || !win || pretendFull || win.isFullScreen() || win.isMaximized() || win.isMinimized()) return;
+  const b = win.getBounds(), fit = windowFit(area);
+  if (b.width > area.width || b.height > area.height || b.width < fit.minWidth || b.height < fit.minHeight) win.setBounds(boundsInside(b, area));
+}
+function onDisplay() { keepInside(); tellDisplay(); }
+/** a monitor came or went: Windows is asked again (a moment later: it is still settling) */
+function onMonitors() { onDisplay(); clearTimeout(monitorTimer); monitorTimer = setTimeout(() => { void learnMonitors(); }, 1500); }
+
+/** who asked for the whole display last. The setup page takes it on a screen held in the hands; the server's page that
+ *  follows keeps it by asking for it itself (its big screen), and gets its window back when it does not */
+let fullBy: "server" | "setup" | null = null;
+/** how long the server's page has to ask for the whole display the setup page left it */
+const FULL_GRACE = 2500;
+/** an automated run's window never comes on screen (fullscreen would show it): it takes the display's size instead, and
+ *  these are the bounds it had */
+let pretendFull: Rectangle | null = null;
+function setFull(on: boolean): boolean {
+  if (!win || win.isDestroyed()) return false;
+  // the minimum is lifted before the window takes the whole display (keepMinimum says why), and is back when it leaves
+  if (!automated) {
+    if (on) win.setMinimumSize(0, 0);
+    win.setFullScreen(on);
+    const now = win.isFullScreen();
+    if (!now) keepMinimum();
+    return now;
+  }
+  if (on && !pretendFull) { pretendFull = win.getBounds(); win.setMinimumSize(0, 0); win.setBounds(windowDisplay().d.bounds); }
+  else if (!on && pretendFull) { const b = pretendFull; pretendFull = null; win.setBounds(b); keepMinimum(); }
+  return on;
+}
+const isFull = () => (automated ? !!pretendFull : !!win?.isFullScreen());
 
 /* ─────────── without its window: the tray, starting with Windows, notifications ─────────── */
 
@@ -282,7 +412,11 @@ async function showServerOrSetup() {
   if (p?.ok) {
     // an address spelled another way (capital letters, a default port) is the same server and stays as it was saved
     if (p.url && !sameServer(p.url, config.serverUrl)) await serverNowAt(p.url);
-    await win?.loadURL(uiUrl()); lastBuild = await serverBuild(); updater.follow(config.serverUrl);
+    await win?.loadURL(uiUrl());
+    // the setup page had the whole display (a handheld): the server's page keeps it by asking for it (its big screen opens
+    // by itself there); one that does not ask gets its window back
+    if (fullBy === "setup") setTimeout(() => { if (fullBy === "setup" && win && kindOfPage(win.webContents.getURL()) === "server") { fullBy = null; setFull(false); } }, FULL_GRACE);
+    lastBuild = await serverBuild(); updater.follow(config.serverUrl);
   }
   // loaded by the very address pageKind compares with: a folder name with a % in it reads the same on both sides
   else { updater.stop(); await win?.loadURL(setupUrl()); }
@@ -383,14 +517,25 @@ handle("config:pickDir", async () => {
   return dir;
 });
 handle("installed", () => engine.installed());
-handle("window:fullscreen", (_p, on: boolean) => { if (!win) return false; win.setFullScreen(!!on); return win.isFullScreen(); });
-handle("window:isFullscreen", () => !!win?.isFullScreen());
-// the page's own zoom (the browser's, so the page lays itself out for the smaller window): only the server's page asks
-handle("window:zoom", (page, factor: number) => {
-  if (!win || page !== "server") return 1;
-  const z = Math.min(ZOOM_MAX, Math.max(1, Number.isFinite(Number(factor)) ? Number(factor) : 1));
+handle("window:fullscreen", (page, on: boolean) => { if (!win) return false; fullBy = on ? page : null; return setFull(!!on); });
+handle("window:isFullscreen", () => isFull());
+// the page's own zoom (the browser's, so the page lays itself out for a smaller or a larger window). Each page has its own:
+// the server's for its big screen, the setup page's on a screen held in the hands. Between a half and four times
+handle("window:zoom", (_p, factor: number) => {
+  if (!win) return 1;
+  const z = zoomOf(factor);
   win.webContents.setZoomFactor(z);
   return z;
+});
+// what the PC knows of the display the window is on (display.ts). The first read of the monitors is waited for, a short
+// while: an answer without it could call a television a handheld, and the page would size itself twice. Not where the answer
+// is whole without it: a display Electron itself calls built in, its size kept from an earlier run
+handle("display:get", async () => {
+  const sure = (d: DisplayInfo) => d.internal === true && d.inches != null;
+  if (learning && !sure(displayNow())) await Promise.race([learning, new Promise(r => setTimeout(r, 5000))]);
+  const info = displayNow();
+  toldDisplay = JSON.stringify(info);
+  return info;
 });
 handle("big:take", () => { const w = wantBig; wantBig = false; return w; });
 // a Windows notification from the server's page, while the window is not in front (in front, the page says it itself).
@@ -490,6 +635,12 @@ else {
     startHidden = process.argv.includes(HIDDEN_ARG) && config.background;
     keepTray();
     keepLoginItem();
+    // the monitors' own word of their size, in the background: the window does not wait for it
+    await loadPanel();
+    void learnMonitors();
+    screen.on("display-metrics-changed", onDisplay);
+    screen.on("display-added", onMonitors);
+    screen.on("display-removed", onMonitors);
     await showServerOrSetup();
     watchPad();
     app.on("activate", () => { if (!win) void showServerOrSetup(); });

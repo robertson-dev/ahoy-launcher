@@ -9,4 +9,8 @@ const r = await Bun.build({
   define: { __AHOY_VERSION__: JSON.stringify(pkg.version) },
 });
 if (!r.success) { for (const l of r.logs) console.error(String(l)); process.exit(1); }
-console.log(`built ${r.outputs.map(o => o.path.split(/[\\/]/).pop()).join(", ")} (v${pkg.version})`);
+// the setup page's own script (assets/setup.html loads it): the pad, its keyboard, a screen held in the hands. For the page,
+// not for node: one plain script, nothing to resolve when it runs
+const page = await Bun.build({ entrypoints: ["src/setup-pad.ts"], outdir: "dist", target: "browser", format: "iife", naming: "[name].js" });
+if (!page.success) { for (const l of page.logs) console.error(String(l)); process.exit(1); }
+console.log(`built ${[...r.outputs, ...page.outputs].map(o => o.path.split(/[\\/]/).pop()).join(", ")} (v${pkg.version})`);

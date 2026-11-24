@@ -61,10 +61,60 @@
   .foot { flex: none; margin-top: auto; padding-top: 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
   .status { display: inline-flex; align-items: center; gap: 8px; color: var(--fg-2); font-size: 13px; min-width: 0; }
   .status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--fg-3); flex: none; }
+  .status:empty { visibility: hidden; }
   .status.ok::before { background: var(--ok); } .status.bad::before { background: var(--bad); } .status.busy::before { background: var(--lamp); }
   @media (max-width: 900px) { .shelf { display: none; } .pane { width: 100%; } }
   /* a short window: less air, so three games show before the list scrolls */
   @media (max-height: 760px) { .pane { padding-top: 48px; padding-bottom: 32px; } .pane > p { margin-bottom: 16px; } }
+
+  /*
+   * With a pad (src/setup-pad.ts, as the app's big screen): the focus shows while the pad or the arrow keys drive
+   * (html[data-drive="pad"]) and the pointer hides it. In the app's own words: a button turns white with dark ink, the
+   * white one lifts and glows, the field gets a white edge. No ring of any colour.
+   */
+  button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+  html[data-pad] button:focus-visible { outline: none; }
+  html[data-drive="pad"] .btn { transition: transform .12s cubic-bezier(.22,1,.36,1), background .12s cubic-bezier(.22,1,.36,1), color .12s cubic-bezier(.22,1,.36,1); }
+  html[data-drive="pad"] .btn[data-pf] { background: #fff; border-color: transparent; color: #101010; transform: scale(1.04); box-shadow: 0 10px 28px rgba(0,0,0,.45); opacity: 1; }
+  html[data-drive="pad"] .btn.primary[data-pf] { transform: scale(1.07); box-shadow: 0 0 0 5px rgba(255,255,255,.24), 0 14px 34px rgba(0,0,0,.5); }
+  html[data-drive="pad"] .btn[disabled][data-pf] { background: #bdbdbd; }
+  /* in a short window the pane scrolls: what the focus comes to is shown with room around it, not flush with the edge */
+  .pane :is(input, .btn) { scroll-margin-block: 32px; }
+  .here li .btn { scroll-margin-block: 8px; }
+  /* (in the list a button stays its size: grown, it would push the list wider than its room and call up a scrollbar) */
+  html[data-drive="pad"] .here .btn[data-pf] { transform: none; box-shadow: none; }
+  .here ul { overflow-x: hidden; }
+  html[data-drive="pad"] input[data-pf] { border-color: transparent; box-shadow: inset 0 0 0 2px #fff; }
+  /* the page's own keyboard, for the address: a sheet along the bottom, the app's keys */
+  .osk { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; padding: 14px 24px 60px; background: rgba(16,16,16,.94); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); box-shadow: inset 0 1px 0 var(--line-strong), 0 -24px 60px rgba(0,0,0,.5); -webkit-app-region: no-drag; animation: rise .2s cubic-bezier(.22,1,.36,1); --k: min(64px, calc((100vw - 48px - 72px) / 10)); }
+  .osk[hidden] { display: none; }
+  @keyframes rise { from { transform: translateY(16px); opacity: 0; } }
+  .osk-field { display: flex; align-items: baseline; gap: 16px; width: min(100%, calc(var(--k) * 10 + 72px)); margin: 0 auto 12px; min-height: 32px; }
+  .osk-name { flex: none; color: var(--fg-2); font: 500 13px/20px var(--ui); }
+  .osk-text { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; direction: rtl; text-align: left; unicode-bidi: plaintext; font: 500 18px/32px var(--mono); color: var(--fg); }
+  .osk-caret { display: inline-block; width: 2px; height: 20px; margin-left: 2px; vertical-align: -3px; background: var(--fg); animation: blink 1.1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .osk-status { flex: 0 1 auto; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-flex; align-items: center; gap: 8px; color: var(--fg-2); font: 13px/20px var(--ui); }
+  .osk-status:empty { display: none; }
+  .osk-status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--fg-3); flex: none; }
+  .osk-status.ok::before { background: var(--ok); } .osk-status.bad::before { background: var(--bad); } .osk-status.busy::before { background: var(--lamp); }
+  .osk-rows { display: grid; gap: 6px; justify-content: center; }
+  .osk-row { display: flex; gap: 8px; justify-content: center; }
+  .key { display: grid; place-items: center; flex: none; width: var(--k); height: 46px; padding: 0; border-radius: 12px; border: 1px solid var(--line-strong); background: var(--raised); color: var(--fg); font: 600 17px/1 var(--ui); transition: transform .12s cubic-bezier(.22,1,.36,1), background .12s cubic-bezier(.22,1,.36,1), color .12s cubic-bezier(.22,1,.36,1); }
+  .key:hover { background: var(--raised-2); }
+  .key.wide { width: var(--k); }
+  .key.quick { width: calc(var(--k) * 1.62); font: 500 14px/1 var(--mono); color: var(--fg-2); }
+  .key.done { width: calc(var(--k) * 2 + 8px); font-size: 15px; font-weight: 700; background: var(--raised-2); border-color: rgba(255,255,255,.28); }
+  .key.on { border-color: rgba(255,255,255,.6); background: var(--raised-2); }
+  html[data-drive="pad"] .key[data-pf] { background: #fff; border-color: transparent; color: #101010; transform: scale(1.1); box-shadow: 0 10px 26px rgba(0,0,0,.5); z-index: 1; }
+  /* what the pad's buttons do: one quiet line, bottom left, while a pad drives */
+  .hints { position: fixed; left: 24px; bottom: 14px; z-index: 30; display: none; align-items: center; gap: 18px; height: 34px; padding: 0 16px 0 12px; border-radius: 17px; background: rgba(30,30,30,.86); border: 1px solid var(--line); color: var(--fg-2); font: 500 13px/1 var(--ui); white-space: nowrap; pointer-events: none; }
+  html[data-drive="pad"] .hints:not([hidden]) { display: inline-flex; }
+  .hints span { display: inline-flex; align-items: center; gap: 7px; }
+  .hints kbd { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(255,255,255,.28); color: var(--fg); font: 700 11px/1 var(--ui); }
+  /* without the shelf the line would lie on the status line: the pane ends above it */
+  @media (max-width: 900px) { html[data-drive="pad"] .pane { padding-bottom: 64px; } }
+  @media (prefers-reduced-motion: reduce) { .osk { animation: none; } .osk-caret { animation: none; } .btn, .key { transition: none; } }
 </style>
 </head>
 <body>
@@ -153,7 +203,8 @@
       $("server").value = c.serverUrl || "";
       $("dir").value = c.libraryDir;
       saved = c.serverUrl || "";
-      if (c.serverUrl) void probe(true);
+      // (no server saved yet: nothing is being looked for, and the line says nothing until an address is typed)
+      if (c.serverUrl) void probe(true); else say("");
       games = playable(await L.installed()); list();
     } catch (e) { fail(e); }
   })();
@@ -172,5 +223,7 @@
     } catch (e) { fail(e); } finally { $("go").disabled = false; busy = false; }
   };
 </script>
+<!-- the page with a pad, its own keyboard for the address, and a screen held in the hands (src/setup-pad.ts) -->
+<script src="../dist/setup-pad.js"></script>
 </body>
 </html>

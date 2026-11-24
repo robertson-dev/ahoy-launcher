@@ -11,7 +11,7 @@ Shows the server's own UI, installs games onto disk, verifies every file, plays,
 [![Bun](https://img.shields.io/badge/built%20with-Bun-f9f1e1?logo=bun&logoColor=14151a)](https://bun.sh)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)](tsconfig.json)
 [![Windows](https://img.shields.io/badge/Windows-NSIS%20installer-0078d4?logo=windows&logoColor=white)](#-building-a-release)
-[![Version](https://img.shields.io/badge/version-0.13.0-6b5bff)](package.json)
+[![Version](https://img.shields.io/badge/version-0.14.0-6b5bff)](package.json)
 
 [Quick setup](#-quick-setup) · [What it does](#-what-it-does) · [How it works](#-how-it-works) · [Layout](#-layout) · [Development](#-development) · [Releases & updates](#-building-a-release)
 
@@ -58,6 +58,7 @@ folder as `launcher/`.
 | 🔔 **Without its window** | Closed, Ahoy stays by the clock (a tray icon: Open, Quit), so what was asked for from a phone or another PC still installs here; it can start with Windows, there and not in front. A Windows notification says when a game is ready; clicking it opens the game's page. |
 | 🎨 **Native feel** | Frameless window with its own title bar and themed scrollbars — the chrome belongs to the app, not the OS. |
 | 📺 **Big screen** | The server's own pages on the whole display, zoomed for a television (a 1080p set shows the app as a 1280 × 720 window, half again as large) and driven by a controller. `Ahoy.exe --big` starts in it (also when Ahoy already runs). In Settings → This PC, a controller's home button (Xbox, PS) can bring Ahoy to the front, or do that and open the big screen, from inside a game too: a window that is never shown listens for it while the setting is on. Windows' own Game Bar listens to the same button; turn that off in Windows (Settings → Gaming → Game Bar) if both answer. |
+| 🎮 **Handhelds** | The launcher asks the monitor itself how large it is and Windows how it is wired: a built-in panel under about ten inches is a handheld's, whatever Windows' scale is set to, and the same PC docked to a television is not. The page sizes its big screen by that (and zooms out where a display has fewer points than the big screen has lines). The window and its smallest size stay inside the display's work area. The first-run page takes the whole display there, larger, and works with the pad alone: a focus over its controls and a keyboard of its own for the address. |
 
 ## 🔩 How it works
 
@@ -91,6 +92,13 @@ sequenceDiagram
   that both already agree (`agree`). A save is named by its place and its path under it, so it is the same file on a PC
   where Documents is somewhere else; the digest two PCs agree by is taken over names, sizes and contents. Nothing is put
   back under a game that runs, and nothing changes on this PC unless every file of a version checked out first.
+- **The display** (0.14.0, features `display` and `zoom-out`): `display()` answers `{ internal, mm, inches, panel, points,
+  scale }` for the display the window is on, and the event `display` says so again when the window moves to another or a
+  monitor comes or goes. The size is the monitor's own word (its EDID, read from Windows' WMI once per run by a hidden
+  PowerShell, in the background; millimetres to the centimetre), `internal` is Electron's word or Windows' of the monitor's
+  connection, and `null` means not known: the page then goes by what it sees itself. `panel` is the PC's own built-in
+  panel whichever display the window is on, kept in `display.json` for a start in the dock with the panel off. `zoom()`
+  goes down to 0.5.
 - **How a game starts can change after it is installed** (0.11.0, feature `launch-refresh`). Play asks the server how the
   package starts now and takes a changed start when an install would: a program the launcher installed for that package,
   inside the game's folder, needing no newer launcher. The game's record and the launcher's own desktop shortcut follow (the
@@ -118,10 +126,13 @@ src/preload.ts     the bridge the web UI sees as window.ahoyLauncher
 src/pad.ts         the page side of the pad watcher (a window that is never shown): tells the main process when a controller's home button is pressed
 src/pad-edge.ts    what one press of that button is (no imports: the watcher is a sandboxed preload)
 src/guard.ts       what the main process checks before it trusts a page, a link, a settings change or an update feed
+src/display.ts     the display the window is on: Windows' word of its monitors read into their real size, a screen held in the hands, the window kept inside the work area (no imports)
+src/setup-pad.ts   the setup page with a pad: the focus, its own keyboard for the address, the whole display on a handheld (bundled for the page: dist/setup-pad.js)
+src/setup-keys.ts  what a press means there, where the focus goes next, what a key does to the address (no imports)
 src/engine.ts      install / verify / prerequisites / play / uninstall (plain Node; tested with bun test)
 src/pull/          blocks.ts: a game as blocks (the index, what is on disk already, the streams); pull-http.ts: file by file, segmented and resumable
 assets/setup.html  first run: the server address and the install folder; signing in happens on the server's page
-build.ts           bundles main/preload/updater into dist/ (electron-updater is bundled in, never external)
+build.ts           bundles main/preload/updater into dist/ (electron-updater is bundled in, never external), and the setup page's script
 tests/             the engine against a fake server (Range-served, session-checked files); e2e against a real one
 ```
 
@@ -129,7 +140,7 @@ tests/             the engine against a fake server (Range-served, session-check
 
 ```sh
 bun install
-bun run build        # dist/main.cjs + dist/preload.cjs + dist/updater.cjs
+bun run build        # dist/main.cjs + dist/preload.cjs + dist/updater.cjs, and dist/setup-pad.js for the setup page
 bun test             # the engine against a fake server
 bun run test:update  # the self-updater against a local feed (and what it must refuse)
 bun run smoke        # the real main process against local stand-in servers: hidden, no account, nothing installed
